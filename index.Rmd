@@ -24,7 +24,7 @@ library(ggpubr)
 library(ggtext)
 ```
 
-This study aims to establish a relationship between the amount of biomass and reflectance of the _Zostera noltii_ seagrass.
+This study aims to establish a relationship between the amount of biomass and reflectance of the _Zostera noltii_ seagrass. 
 
 ## Method
 
