@@ -1,0 +1,588 @@
+---
+title: Is there a general relationship between the seagrass _Zostera noltii_ biomass and the field
+  spectroradiometer readings?
+author: "Lee, Chengfa Benjamin"
+date: "`r Sys.Date()`"
+output: bookdown::html_document2 # html_document (for publishing), bookdown::html_document2 (for publishing with dynamic referencing), html_notebook (for previewing)
+bibliography: references.bib 
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(magrittr)
+library(readxl)
+library(zoo) 
+library(ggplot2)
+library(ggiraph)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggpubr)
+library(ggtext)
+```
+
+This study aims to establish a relationship between the amount of biomass and reflectance of the _Zostera noltii_ seagrass.
+
+## Method
+
+This data exploration uses the hyperspectral and biomass data collected during these field campaigns in [Aveiro (July 2025)](https://sigoiry.github.io/Spectra_Aveiro_2025/) and [Bourgneuf Bay (September 2025)](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/). 
+
+### Hyperspectral data
+
+For each sample, the hyperspectral signature was smoothed with a moving window of size 11 using the `rollapply()` function from the `zoo` package [@zoo2005]. While this means that the first and last five wavelengths would be smoothed with a partial moving window of less than 11 values, given the spectroradiometer's full wavelength range of 325nm to 1075nm and the final working range of 400nm to 900nm, these affected wavelengths will be filtered out and thus irrelevant here.
+
+Post-smoothing, only the wavelengths from 400nm to 900nm are retained and a min-max standardisation was performed.
+
+```{r hsPreprocessingBB}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.spectra.BB <- local({
+  asd <- list.files('data/spectra/BB', full.names = TRUE) %>%
+    read.csv(sep = '\t') %>%
+    pivot_longer(cols = names(.) %>% grep('Wavelength', ., invert = TRUE, value = TRUE), names_to = "ASD", values_to = 'value')
+    
+    asd$Station <- lapply(asd$ASD, FUN = function(string) {
+      str_split(string, '\\.') %>%
+        unlist() %>%
+        "["(1)
+      }) %>% 
+      unlist()
+  
+  output <- asd %>%
+    group_by(Wavelength,Station) %>%
+    summarise(raw.value = mean(value, na.rm = TRUE)) %>%
+    ungroup() %>%
+    group_by(Station) %>%
+    mutate(raw.value = rollapply(raw.value, 11, mean, partial = TRUE, align = 'center'), .keep = 'all') %>% 
+    ungroup() %>%
+    filter(Wavelength >= 400, Wavelength <= 900) %>%
+    group_by(Station) %>%
+    mutate(std.value = (raw.value - min(raw.value))/(max(raw.value) - min(raw.value)), .keep = "all") %>%
+    ungroup()
+  
+  output$Station <- output$Station %>%
+    gsub('H', "H_", .)  
+  
+  output %>% 
+    pivot_longer(cols = c(raw.value, std.value), names_to = 'processing', values_to = 'value')  %>%
+    rename(id = Station)
+})
+```
+
+
+```{r hsPreprocessingAV}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.spectra.AV <- local({
+  df <- list.files('data/spectra/AV', full.names = TRUE) %>%
+    grep('\\.txt', ., value = TRUE) %>%
+    lapply(FUN = function(f) {
+      g <- read.csv(f, sep = '\t')
+      h <- names(g)[2] %>% 
+        gsub('\\.asd', "", .)
+        names(g)[2] <- "reading"
+        g$Name <- h
+      
+      g
+    }) %>%
+    do.call(rbind, .)
+  
+  df$dataset <- df$Name %>%
+    lapply(FUN = function(name) {
+      out <- str_split(name, '00') %>% 
+        unlist() %>%
+        head(1) %>%
+        unlist()
+    }) %>% 
+    unlist()
+  df$rep <- df$Name %>%
+    lapply(FUN = function(name) {
+      out <- str_split(name, '00') %>% 
+        unlist() %>%
+        tail(1) %>%
+        unlist()
+    }) %>%
+    unlist() %>%
+    as.numeric() %>%
+    "+"(1) 
+  
+  ## add in station IDs from metadata file
+  df <- df %>%
+    mutate(id = case_when(
+    # NG group
+    dataset == 'AVEI2' & rep >= 341 & rep <= 360 ~ "NG12",
+    dataset == 'AVEI2' & rep >= 401 & rep <= 420 ~ "NG15",
+    dataset == 'AVEI2' & rep >= 381 & rep <= 400 ~ "NG16",
+    dataset == 'AVEI2' & rep >= 301 & rep <= 320 ~ "NG18",
+    dataset == 'AVEI2' & rep >= 281 & rep <= 300 ~ "NG25",
+    dataset == 'AVEI2' & rep >= 261 & rep <= 280 ~ "NG30",
+    dataset == 'AVEI2' & rep >= 221 & rep <= 240 ~ "NG31",
+    dataset == 'AVEI2' & rep >= 201 & rep <= 220 ~ "NG32",
+    dataset == 'AVEI2' & rep >= 361 & rep <= 380 ~ "NR43", 
+    dataset == 'AVEI2' & rep >= 321 & rep <= 340 ~ "NR44", 
+    dataset == 'AVEI2' & rep >= 241 & rep <= 260 ~ "NR52", 
+
+    # HG 50 group (spectra for heat shock paper -- Simon // not used for carbon/biomass)
+    dataset == 'SHSI' & rep >= 301 & rep <= 320 ~ "HG_50_1",
+    dataset == 'SHSI' & rep >= 321 & rep <= 340 ~ "HG_50_2",
+    dataset == 'SHSI' & rep >= 341 & rep <= 360 ~ "HG_50_3",
+    dataset == 'SHSI' & rep >= 361 & rep <= 380 ~ "HG_50_4",
+    dataset == 'SHSI' & rep >= 381 & rep <= 400 ~ "HG_50_5",
+
+    # HG SHSI group
+    dataset == 'SHSI' & rep >= 1 & rep <= 20 ~ "HG_SHSI_1",
+    dataset == 'SHSI' & rep >= 21 & rep <= 40 ~ "HG_SHSI_2",
+    dataset == 'SHSI' & rep >= 41 & rep <= 60 ~ "HG_SHSI_3",
+    dataset == 'SHSI' & rep >= 61 & rep <= 80 ~ "HG_SHSI_4",
+    dataset == 'SHSI' & rep >= 81 & rep <= 100 ~ "HG_SHSI_5",
+    dataset == 'SHSI' & rep >= 101 & rep <= 120 ~ "HG_SHSI_6",
+    dataset == 'SHSI' & rep >= 121 & rep <= 140 ~ "HG_SHSI_7",
+    dataset == 'SHSI' & rep >= 141 & rep <= 160 ~ "HG_SHSI_8",
+    dataset == 'SHSI' & rep >= 161 & rep <= 180 ~ "HG_SHSI_9",
+    dataset == 'SHSI' & rep >= 181 & rep <= 200 ~ "HG_SHSI_10",
+    dataset == 'SHSI' & rep >= 201 & rep <= 220 ~ "HG_SHSI_11",
+    dataset == 'SHSI' & rep >= 221 & rep <= 240 ~ "HG_SHSI_12",
+    dataset == 'SHSI' & rep >= 241 & rep <= 260 ~ "HG_SHSI_13",
+    dataset == 'SHSI' & rep >= 261 & rep <= 280 ~ "HG_SHSI_14",
+    dataset == 'SHSI' & rep >= 281 & rep <= 300 ~ "HG_SHSI_15",
+    
+    # HG AVEI2 group
+    dataset == 'AVEI2' & rep >= 1 & rep <= 20 ~ "HG_AVEI2_1",
+    dataset == 'AVEI2' & rep >= 21 & rep <= 40 ~ "HG_AVEI2_2",
+    dataset == 'AVEI2' & rep >= 41 & rep <= 60 ~ "HG_AVEI2_3",
+    dataset == 'AVEI2' & rep >= 61 & rep <= 80 ~ "HG_AVEI2_4",
+    dataset == 'AVEI2' & rep >= 81 & rep <= 100 ~ "HG_AVEI2_5",
+    dataset == 'AVEI2' & rep >= 101 & rep <= 120 ~ "HG_AVEI2_6",
+    dataset == 'AVEI2' & rep >= 121 & rep <= 140 ~ "HG_AVEI2_7",
+    dataset == 'AVEI2' & rep >= 141 & rep <= 160 ~ "HG_AVEI2_8",
+    dataset == 'AVEI2' & rep >= 161 & rep <= 180 ~ "HG_AVEI2_9",
+    dataset == 'AVEI2' & rep >= 181 & rep <= 200 ~ "HG_AVEI2_10",
+    dataset == 'AVEI2' & rep >= 201 & rep <= 220 ~ "HG_AVEI2_11",
+    
+    # RR/RG group
+    dataset == 'AVE' & rep >= 1 & rep <= 20 ~ "RG12",
+    dataset == 'AVE' & rep >= 21 & rep <= 40 ~ "RR36",
+    dataset == 'AVE' & rep >= 41 & rep <= 60 ~ "RG5", 
+    dataset == 'A' & rep >= 1 & rep <= 20 ~ "RG13",
+    dataset == 'A' & rep >= 21 & rep <= 40 ~ "RG6", 
+    dataset == 'A' & rep >= 41 & rep <= 60 ~ "RG7", 
+    dataset == 'A' & rep >= 61 & rep <= 80 ~ "RG8", 
+    dataset == 'A' & rep >= 101 & rep <= 120 ~ "RR46",
+    dataset == 'A' & rep >= 121 & rep <= 140 ~ "RG16",
+    dataset == 'A' & rep >= 141 & rep <= 160 ~ "RG23",
+    dataset == 'A' & rep >= 161 & rep <= 180 ~ "RR45",
+    dataset == 'A' & rep >= 181 & rep <= 200 ~ "RG22",
+    
+    # RW_TR group
+    dataset == 'A' & rep >= 201 & rep <= 220 ~ "RW_TR_1",
+    dataset == 'A' & rep >= 221 & rep <= 240 ~ "RW_TR_2",
+    dataset == 'A' & rep >= 241 & rep <= 260 ~ "RW_TR_3",
+    dataset == 'A' & rep >= 261 & rep <= 280 ~ "RW_TR_4",
+    dataset == 'A' & rep >= 281 & rep <= 300 ~ "RW_TR_5",
+    dataset == 'A' & rep >= 301 & rep <= 320 ~ "RW_TR_6",
+    dataset == 'A' & rep >= 321 & rep <= 340 ~ "RW_TR_7",
+    dataset == 'A' & rep >= 341 & rep <= 360 ~ "RW_TR_8",
+    dataset == 'A' & rep >= 361 & rep <= 380 ~ "RW_TR_9",
+    dataset == 'A' & rep >= 381 & rep <= 400 ~ "RW_TR_10"
+  ))
+  
+  df <- df %>%
+    # average the readings 
+    filter(!is.na(id)) %>%
+    group_by(id, Wavelength) %>%
+    select(-c(rep, Name)) %>%
+    summarise(raw.value = mean(reading), dataset = unique(dataset)) %>%
+    ungroup() %>%
+    group_by(id) %>%
+    mutate(raw.value = rollapply(raw.value, 11, mean, partial = TRUE, align = 'center'), .keep = 'all') %>%
+    ungroup() %>%
+    filter(Wavelength >= 400 & Wavelength <= 900) %>%
+    group_by(id) %>%
+    mutate(std.value = (raw.value - min(raw.value))/(max(raw.value) - min(raw.value)), .keep = 'all') %>%
+    ungroup() %>%
+    pivot_longer(cols = c(raw.value, std.value), names_to = 'processing', values_to = 'value')
+  
+  meta <- list.files("data/spectra/AV", full.names = TRUE) %>%
+    grep('Metadata_spectra', ., value = TRUE) %>%
+    read_xlsx() %>%
+    select(-c(Spectra)) 
+  
+  df <- df %>%
+    left_join(meta, by = join_by(id == ID))
+})
+```
+
+### Carbon content data
+
+The dried leaf (aboveground biomass, AGB) and root (belowground biomass, BGB) biomass were pulverised prior to the [measurement of total carbon (TC) and inorganic carbon (IC) content in fly ash](https://www.shimadzu.com/an/apl/22347/index.html) using a [SSM-5000A Shimadzu Solid Sample Combusion Unit](https://www.shimadzu.com/an/products/total-organic-carbon-analysis/toc-analysis-system/ssm-5000a/index.html). To measure the TC content in a sample, about 70g of powdered biomass is combusted at 900&deg;C for 8 minutes. For the IC content measurement, about 300g of powdered biomass is mixed with 9ml of phosphorous acid (HPO~3~) and combusted at 300&deg;C until no carbon dioxide is detected. The measurements are scaled to the total weight of the samples using Equation \@ref(eq:carbon). The [difference between the TC and IC is the total organic carbon content (TOC)](https://www.shimadzu.com/an/apl/24168/index.html).
+
+<!-- check formula -->
+\begin{equation}
+Carbon\,concentration\,(g\,per\,C/kg) = \frac{Measured\,Carbon\,(mg) \times Dry\,Weight\,(\%) \times 1000}{Wet\,weight\,of\,essay\,(mg)} (\#eq:carbon)
+\end{equation}
+
+
+### General relationship between reflectance and biomass
+
+As the relationship established using the hyperspectral data will be applied onto the Sentinel-2 (S2) image, the hyperspectral data needs to be translated to be equivalent to S2. This was explored and optimised in two ways:
+
+- Using the centre [@zoffoli2020] vs the [peak](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/) wavelength of S2A bands, based on the [S2 Spectral Response Function Document: COPE-GSEG-EOPG-TN-15-0007](https://sentiwiki.copernicus.eu/web/document-library#DocumentLibrary-SENTINEL-2Documents)
+- Testing three different vegetative indices, based on the comparison by @bargain2013.
+  - Normalised Difference Vegetative Index (NDVI)
+  - Atmospherically-Resistant Vegetative Index (ARVI)
+  - Modified Normalised Difference Index equivalent to the B5 and B6 bands of S2 (mND)
+
+While there were no significant difference in predictive performance between the centre and peak band wavelength, the latter was slightly better. For brevity, the results henceforth are based on the peak wavelength of the S2 bands.
+
+Similarly, the indices performed similarly. NDVI is the only index here that uses only the 10m spatial resolution bands, unlike the ARVI and mND which rely on the 20m spatial resolution coastal band. Therefore, NDVI was selected as the optimal index.
+
+```{r biomassPreprocessingBB}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+convert_biomass_to_per_m2 <- function(biomass) {
+  core_area <- pi*((15/2)^2)
+  biomass_per_m2 <- biomass*(100*100/core_area)
+  
+  return(biomass_per_m2)
+}
+
+csv.biomass.BB <- local({
+  df <- list.files('data/biomass/BB', full.names = TRUE) %>%
+    read_xlsx() %>%
+    rename(id = Station)
+  
+    df$A_per_m2 <- convert_biomass_to_per_m2(df$A)
+    df$B_per_m2 <- convert_biomass_to_per_m2(df$B)
+    
+  df.spectra <- csv.spectra.BB %>%
+    group_by(id) %>%
+    filter(processing == "raw.value") %>% 
+    select(-processing) %>%
+    summarise(
+      # S2 srf peak wavelength
+      coastal.445.hs = value[Wavelength == 445], blue.520.hs = value[Wavelength == 520], red.670.hs = value[Wavelength == 670], 
+      nir.701.hs = value[Wavelength == 701], nir.743.hs = value[Wavelength == 743], nir.800.hs = value[Wavelength == 800], 
+      ndvi.s2peak.hs = (nir.800.hs - red.670.hs)/(nir.800.hs + red.670.hs), 
+      arvi.s2peak.hs = (nir.800.hs - (red.670.hs - (blue.520.hs - red.670.hs)))/(nir.800.hs + (red.670.hs - (blue.520.hs - red.670.hs))), 
+      mND_B5B6.s2peak.hs = (nir.743.hs - nir.701.hs)/(nir.743.hs + nir.701.hs - 2*coastal.445.hs),
+      # centre wavelength of band range (Zoffoli et al. ,2020)
+      coastal.434.hs = value[Wavelength == 434], blue.495.hs = value[Wavelength == 495], red.665.hs = value[Wavelength == 665], 
+      nir.705.hs = value[Wavelength == 705], nir.740.hs = value[Wavelength == 740], nir.842.hs = value[Wavelength == 842], 
+      ndvi.s2mid.hs = (nir.842.hs - red.665.hs)/(nir.842.hs + red.665.hs), 
+      arvi.s2mid.hs = (nir.842.hs - (red.665.hs - (blue.495.hs - red.665.hs)))/(nir.842.hs + (red.665.hs - (blue.495.hs - red.665.hs))), 
+      mND_B5B6.s2mid.hs = (nir.740.hs - nir.705.hs)/(nir.740.hs + nir.705.hs - 2*coastal.434.hs)
+      )  
+  
+  df.output <- df %>%
+    left_join(df.spectra, by = join_by(id == id)) %>%
+    group_by(id)  %>%
+    select(-contains('blue'),-contains('red'),-contains('coastal'),-contains('nir'), -A, -B) %>%
+    pivot_longer(cols = contains('hs'), names_sep = '\\.', names_to = c('index','approach','.value')) %>%
+    pivot_longer(cols = c(A_per_m2, B_per_m2), names_to = 'biomass', values_to = 'weight_per_m2') %>%
+    filter(approach == "s2peak") %>%
+    filter(biomass != 'T_per_m2') %>%
+    filter(index != 'arvi') %>%
+    select(-c(approach)) %>%
+    rename(value = hs)
+})
+```
+
+```{r biomassPreprocessingAV}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.biomass.AV <- local({
+  df <- list.files('data/biomass/AV', full.names = TRUE) %>%
+    read_xlsx(sheet = 'data') %>%
+    select(-c(longitude, latitude, poskey.benthos, poskey.sediment, remark))
+    df$`spectral camera`[df$`spectral camera` == 'no'] <- NA
+    df$spectra <- !is.na(df$`spectral camera`)
+    
+    df$A_per_m2 <- convert_biomass_to_per_m2(df$seagrassA/1000)
+    df$B_per_m2 <- convert_biomass_to_per_m2(df$seagrassB/1000)
+    
+    df$name <- gsub(" ", "", df$name)
+    
+  df.spectra <- csv.spectra.AV %>%
+    group_by(id) %>%
+    filter(processing == "raw.value") %>% 
+    select(-processing) %>%
+    mutate(
+      # S2 srf peak wavelength
+      coastal.445.hs = value[Wavelength == 445], blue.520.hs = value[Wavelength == 520], red.670.hs = value[Wavelength == 670], 
+      nir.701.hs = value[Wavelength == 701], nir.743.hs = value[Wavelength == 743], nir.800.hs = value[Wavelength == 800], 
+      ndvi.s2peak.hs = (nir.800.hs - red.670.hs)/(nir.800.hs + red.670.hs), 
+      arvi.s2peak.hs = (nir.800.hs - (red.670.hs - (blue.520.hs - red.670.hs)))/(nir.800.hs + (red.670.hs - (blue.520.hs - red.670.hs))), 
+      mND_B5B6.s2peak.hs = (nir.743.hs - nir.701.hs)/(nir.743.hs + nir.701.hs - 2*coastal.445.hs),
+      # centre wavelength of band range (Zoffoli et al. ,2020)
+      coastal.434.hs = value[Wavelength == 434], blue.495.hs = value[Wavelength == 495], red.665.hs = value[Wavelength == 665], 
+      nir.705.hs = value[Wavelength == 705], nir.740.hs = value[Wavelength == 740], nir.842.hs = value[Wavelength == 842], 
+      ndvi.s2mid.hs = (nir.842.hs - red.665.hs)/(nir.842.hs + red.665.hs), 
+      arvi.s2mid.hs = (nir.842.hs - (red.665.hs - (blue.495.hs - red.665.hs)))/(nir.842.hs + (red.665.hs - (blue.495.hs - red.665.hs))), 
+      mND_B5B6.s2mid.hs = (nir.740.hs - nir.705.hs)/(nir.740.hs + nir.705.hs - 2*coastal.434.hs)
+      ) %>%
+    ungroup()
+    
+  output <- df.spectra %>%
+    group_by(id) %>%
+    summarise(dataset = unique(dataset), Group = unique(Group), Site = unique(Site), across(names(df.spectra %>% select(-c(id,Wavelength,dataset,Group,Site,value))), ~ mean(.x, na.rm = TRUE))) %>%
+    inner_join(df, by = join_by(id == name)) %>%
+    pivot_longer(cols = c(A_per_m2, B_per_m2), names_to = 'biomass', values_to = 'weight_per_m2') %>%
+    select(-c(SPC_expected, SPC_TRUE, Benthos_code, Sediment_code,picture, seagrassA, seagrassB, `sorting lab`, seagrass.cover.Laurant, `spectral camera`, spectra)) %>%
+    select(-contains('blue'),-contains('red'),-contains('coastal'),-contains('nir')) %>%
+    pivot_longer(cols = contains('hs'), names_sep = '\\.', names_to = c('index','approach','.value'))
+
+  output %>% 
+    filter(approach == "s2peak") %>%
+    filter(biomass != 'T_per_m2') %>%
+    filter(index != 'arvi') %>%
+    select(-c(approach, habitat, Group, dataset, type, Site)) %>%
+    rename(value = hs) 
+})
+```
+
+```{r biomassPreprocessingFinal}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.biomass <- local({
+  bb <- csv.biomass.BB
+  bb$Location <- 'Bourgneuf_bay'
+  # bb$site <- "natural"
+  bb$site <- case_when(grepl("H", bb$id) ~ 'high',
+                       grepl("L", bb$id) ~ 'low')
+  
+  av <- csv.biomass.AV
+  av$Location <- 'Aveiro'
+  
+  rbind(bb, av)
+})
+
+csv.biomass$site_location <- paste(csv.biomass$site, csv.biomass$Location, sep = "_")
+
+## Post-processing
+csv.biomass <- csv.biomass %>%
+  filter(!id %in% c("NR43", "RG5", "RG12", "RG13", "NR52", "NR44") %>% replace_na(TRUE)) # remove anomalous data; 
+
+## Remove duplicate data from the different indices
+csv.biomass <- csv.biomass %>%
+  filter(index == 'ndvi') %>%
+  select(-index) %>% 
+  distinct()
+
+# print(csv.biomass %>% select(id) %>% table()) ## for counting data. Each station should have 2 points in the frequency table (AGB & BGB).
+
+```
+
+### Accuracy Assessment
+
+The adjusted R^2^, root mean square error (RMSE), and relative/normalised RMSE were used to assess the performance of the linear models. The adjusted R^2^ was obtained from the `stat_regline_equation()` function in the `ggpubr` package [@ggpubr]. RMSE was obtained from the `lm()` function in the `stats` package [@Rversion]. The relative RMSE was obtained by dividing the RMSE with the mean of the independent variable.
+
+## Result
+
+### Biomass
+
+The aggregated dataset suggests a linear relationship between the leaf and root biomass, with a large variation (Figure \@ref(fig:biomass), Adj. R^2^ = 0.56, RMSE = 22.3). The points with the largest distance from the proposed linear relationships are RR36 (Aveiro rewilded), L_03 (Bourgneuf Bay sparse meadow) and H_20 (Bourgneuf Bay dense meadow).
+
+```{r biomass, fig.cap = paste("Scatterplot of leaf biomass (AGB) to root biomass (BGB) of _Zostera noltii_ across two sites. The data for Bourgneuf Bay was collected from a dense (n = ", csv.biomass %>% filter(site_location == "high_Bourgneuf_bay" & biomass == "A_per_m2") %>% drop_na(weight_per_m2) %>% nrow(), ") and sparse (n = ", csv.biomass %>% filter(site_location == "low_Bourgneuf_bay" & biomass == "A_per_m2") %>% drop_na(weight_per_m2) %>% nrow(), ") meadow, while the data for Aveiro was collected from a natural (n = ", csv.biomass %>% filter(site_location == "natural_Aveiro" & biomass == "A_per_m2") %>% drop_na(weight_per_m2) %>% nrow(), ") and a rewilded (n = ", csv.biomass %>% filter(site_location == "rewilded_Aveiro" & biomass == "A_per_m2") %>% drop_na(weight_per_m2) %>% nrow(), ") site. Owing to some stations having no seagrass AGB and BGB, ", csv.biomass %>% filter(biomass == "B_per_m2" & weight_per_m2 == 0) %>% nrow()," data points are overlapping at the plot origin (0,0).", sep = "")}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+## Compare AGB to BGB
+plt.biomass <- csv.biomass %>%
+  pivot_wider(names_from = biomass, values_from = weight_per_m2) %>%
+  ggplot(aes(x = B_per_m2, y = A_per_m2)) +
+    geom_smooth(method = 'lm', colour = 'black') +
+    geom_point_interactive(aes(tooltip = paste0('id: ', id), data_id = id, colour = site_location)) +
+    scale_colour_discrete('Location', labels = c("natural_Aveiro" = "Aveiro (natural)", "rewilded_Aveiro" = "Aveiro (rewilded)", "high_Bourgneuf_bay" = "Bourgneuf Bay (dense)", "low_Bourgneuf_bay" = "Bourgneuf Bay (sparse)")) +
+    xlab('Belowground Biomass') + ylab('Aboveground Biomass') +
+    stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
+    ggtitle('AGB vs BGB')
+
+girafe(ggobj = plt.biomass,
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 7.5
+)
+```
+
+```{r biomassRMSE}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.biomass %>%
+  ungroup() %>%
+  pivot_wider(names_from = biomass, values_from = weight_per_m2) %>%
+  distinct() %>%
+  drop_na(c(A_per_m2, B_per_m2)) %>%
+  summarise(`Relative RMSE` = summary(lm(A_per_m2 ~ B_per_m2))$residuals^2 %>% mean() %>% sqrt() %>% "/"(mean(A_per_m2)) %>% "*"(100),
+            RMSE = summary(lm(A_per_m2 ~ B_per_m2))$residuals^2 %>% mean() %>% sqrt())
+```
+
+
+### Hyperspectral data
+
+```{r hyperspectral_preprocessing}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.hs <- local({
+  csv.spectra.BB$id <- gsub("H", "H_", csv.spectra.BB$id)
+  csv.spectra.BB$Location <- 'Bourgneuf_bay'
+  csv.spectra.BB$processing[csv.spectra.BB$processing == 'minmax.value'] <- 'std.value'
+  
+  csv.spectra.AV$Location <- 'Aveiro'
+  csv.spectra.AV2 <- csv.spectra.AV  %>% 
+    select(-c(contains("hs"), contains("SPC"), Benthos_code, Sediment_code, Group, dataset, Site)) 
+  
+  rbind(csv.spectra.BB, csv.spectra.AV2) 
+})
+
+csv.hs.long <- csv.hs %>%
+  group_by(id) %>%
+  left_join(csv.biomass %>% select(c(id, biomass, weight_per_m2, site_location)), by = join_by(id == id), relationship = 'many-to-many') %>% 
+  distinct() %>%
+  filter((biomass != 'B_per_m2') %>% replace_na(TRUE)) 
+```
+
+Generally, the greater the dry weight, the lower the reflectance (Figure \@ref(fig:hsRaw) and Figure \@ref(fig:hsStd)). In particular, the absorption at around 670nm (S2 red band) is greater with more seagrass AGB. 
+
+
+
+```{r hsRaw, fig.cap = "Raw spectroradiometer reflectance measurements compared against the dry weight (g/m^2^). There were no hyperspectral readings taken in the sparse meadows in Bourgneuf Bay."}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+plt.raw_biomass_comparison <- csv.hs.long %>%
+  drop_na() %>%
+  filter(processing == 'raw.value') %>%
+  ggplot(aes(x = Wavelength, y = value, colour = weight_per_m2, group = id)) + 
+  geom_line_interactive(aes(tooltip = paste0("AGB: ", round(weight_per_m2, 2), ' g/m<sup>2</sup> (id: ', id,')'), data_id = id)) +
+  scale_colour_viridis_c(option = 'turbo') +
+  xlab('Wavelength') + ylab('Reflectance') + labs(colour = 'Dry Weight (g/m<sup>2</sup>)') +
+  facet_grid(. ~ site_location, labeller = labeller(
+    site_location = c(natural_Aveiro = "Aveiro (natural)", rewilded_Aveiro = "Aveiro (rewilded)", high_Bourgneuf_bay = "Bourgneuf Bay (dense)", low_Bourgneuf_bay = 'Bourgneuf Bay (sparse)')
+  )) +
+  theme(legend.title = element_markdown()) +
+  ggtitle('Raw values of spectroradiometer measurements to the leaf dry weight')
+
+girafe(ggobj = plt.raw_biomass_comparison,
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 14
+)
+```
+
+```{r hsStd, fig.cap = "Min-max standardised spectroradiometer reflectance measurements compared against the dry weight (g/m^2^). There were no hyperspectral readings taken in the sparse meadows in Bourgneuf Bay."}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+plt.std_biomass_comparison <- csv.hs.long %>%
+  drop_na() %>%
+  filter(processing == 'std.value') %>%
+  ggplot(aes(x = Wavelength, y = value, colour = weight_per_m2, group = id)) + 
+  geom_line_interactive(aes(tooltip = paste0("AGB: ", round(weight_per_m2, 2), ' g/m<sup>2</sup> (id: ', id,')'), data_id = id)) +
+  scale_colour_viridis_c(option = 'turbo') +
+  xlab('Wavelength') + ylab('Reflectance') + labs(colour = 'Dry Weight (g/m<sup>2</sup>)') +
+  facet_grid(. ~ site_location, labeller = labeller(
+    site_location = c(natural_Aveiro = "Aveiro (natural)", rewilded_Aveiro = "Aveiro (rewilded)", high_Bourgneuf_bay = "Bourgneuf Bay (dense)", low_Bourgneuf_bay = 'Bourgneuf Bay (sparse)')
+  )) +
+  theme(legend.title = element_markdown()) +
+  ggtitle('Min-max standardised values of spectroradiometer measurements to the leaf dry weight')
+
+girafe(ggobj = plt.std_biomass_comparison,
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 14
+)
+```
+
+### Carbon data
+
+Work in progress. This section will be updated whenever the work is completed.
+
+
+
+### General relationship between the reflectance and biomass
+
+A linear relationship was established between the spectroradiometer-derived NDVI and the seagrass leaf biomass (Figure \@ref(fig:reflectance), Adj. R^2^ = 0.68, RMSE = 20.4). The points furthest from the established linear equation are RR36 (Aveiro rewilded), RR45 (Aveiro rewilded) and H_23 (Bourgneuf Bay dense meadow).
+
+```{r reflectance, fig.cap = paste("Scatterplot of spectroradiometer-derived NDVI to seagrass leaf biomass. The data points used are: Bourgneuf Bay dense meadow (n = ", csv.biomass %>% filter(site_location == "high_Bourgneuf_bay" & biomass == "A_per_m2") %>% drop_na(value) %>% nrow(), "), Bourgneuf Bay sparse meadow (n = ", csv.biomass %>% filter(site_location == "low_Bourgneuf_bay" & biomass == "A_per_m2") %>% drop_na(value) %>% nrow(), "), Aveiro natural meadow (n = ", csv.biomass %>% filter(site_location == "natural_Aveiro" & biomass == "A_per_m2") %>% drop_na(value) %>% nrow(), ") and Aveiro rewilded meadow (n = ", csv.biomass %>% filter(site_location == "rewilded_Aveiro" & biomass == "A_per_m2") %>% drop_na(value) %>% nrow(), ").", sep = "")}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+plt.raw_biomass_index <- csv.biomass %>%
+  filter(biomass == 'A_per_m2') %>%
+  distinct() %>%
+  ggplot(aes(x = value, y = weight_per_m2)) + 
+    geom_smooth(method = 'lm', colour = 'black') +
+    geom_point_interactive(aes(tooltip = paste0("Biomass: ", round(weight_per_m2, 2), ' g/m<sup>2</sup> (id: ', id,')'), data_id = id, colour = site_location)) +
+    xlab('NDVI') + ylab('Dry Weight (g/m<sup>2</sup>)') + 
+    stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
+    scale_colour_discrete('Location', labels = c("natural_Aveiro" = "Aveiro (natural)", "rewilded_Aveiro" = "Aveiro (rewilded)", "high_Bourgneuf_bay" = "Bourgneuf Bay (dense)", "low_Bourgneuf_bay" = "Bourgneuf Bay (sparse)")) +
+    theme(axis.title.y = element_markdown()) +
+    ggtitle('Spectroradiometer NDVI to leaf biomass')
+
+girafe(ggobj = plt.raw_biomass_index,
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 9
+)
+```
+
+```{r reflectanceRMSE}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.biomass %>%
+  ungroup() %>%
+  filter(biomass == 'A_per_m2') %>%
+  distinct() %>%
+  drop_na(c(weight_per_m2, value)) %>%
+  summarise(`Relative RMSE` = summary(lm(weight_per_m2 ~ value))$residuals^2 %>% mean() %>% sqrt() %>% "/"(mean(weight_per_m2)) %>% "*"(100),
+            RMSE = summary(lm(weight_per_m2 ~ value))$residuals^2 %>% mean() %>% sqrt())
+```
+
+## References
