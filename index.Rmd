@@ -454,7 +454,6 @@ csv.biomass %>%
 csv.hs <- local({
   csv.spectra.BB$id <- gsub("H", "H_", csv.spectra.BB$id)
   csv.spectra.BB$Location <- 'Bourgneuf_bay'
-  csv.spectra.BB$processing[csv.spectra.BB$processing == 'minmax.value'] <- 'std.value'
   
   csv.spectra.AV$Location <- 'Aveiro'
   csv.spectra.AV2 <- csv.spectra.AV  %>% 
