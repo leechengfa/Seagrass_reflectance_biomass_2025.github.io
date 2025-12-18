@@ -2,7 +2,7 @@
 title: Is there a general relationship between the seagrass _Zostera noltii_ biomass and the field
   spectroradiometer readings?
 author: "Lee, Chengfa Benjamin"
-date: "`r Sys.Date()`"
+date: "18 December 2025 (last updated on `r format(Sys.Date(), '%d %B %Y')`)"
 output: bookdown::html_document2 # html_document (for publishing), bookdown::html_document2 (for publishing with dynamic referencing), html_notebook (for previewing)
 bibliography: references.bib 
 editor_options:
@@ -413,7 +413,7 @@ plt.biomass <- csv.biomass %>%
     geom_smooth(method = 'lm', colour = 'black') +
     geom_point_interactive(aes(tooltip = paste0('id: ', id), data_id = id, colour = site_location)) +
     scale_colour_discrete('Location', labels = c("natural_Aveiro" = "Aveiro (natural)", "rewilded_Aveiro" = "Aveiro (rewilded)", "high_Bourgneuf_bay" = "Bourgneuf Bay (dense)", "low_Bourgneuf_bay" = "Bourgneuf Bay (sparse)")) +
-    xlab('Belowground Biomass') + ylab('Aboveground Biomass') +
+    xlab('Belowground Biomass (g/m<sup>2</sup>)') + ylab('Aboveground Biomass (g/m<sup>2</sup>)') +
     stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
     ggtitle('AGB vs BGB')
 
