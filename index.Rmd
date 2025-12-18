@@ -415,6 +415,7 @@ plt.biomass <- csv.biomass %>%
     scale_colour_discrete('Location', labels = c("natural_Aveiro" = "Aveiro (natural)", "rewilded_Aveiro" = "Aveiro (rewilded)", "high_Bourgneuf_bay" = "Bourgneuf Bay (dense)", "low_Bourgneuf_bay" = "Bourgneuf Bay (sparse)")) +
     xlab('Belowground Biomass (g/m<sup>2</sup>)') + ylab('Aboveground Biomass (g/m<sup>2</sup>)') +
     stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
+    theme(axis.title.x = element_markdown(), axis.title.y = element_markdown()) +
     ggtitle('AGB vs BGB')
 
 girafe(ggobj = plt.biomass,
