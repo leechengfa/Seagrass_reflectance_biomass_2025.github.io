@@ -428,15 +428,15 @@ Carbon\,concentration\,(g\,per\,C/kg) = \frac{Measured\,Carbon\,(mg) \times Dry\
 
 As the relationship established using the [Normalised Difference Vegetation Index](https://en.wikipedia.org/wiki/Normalized_difference_vegetation_index) derived from hyperspectral data will be applied onto the Sentinel-2 (S2) image, the hyperspectral data needs to be translated to be equivalent to S2. This was explored and optimised in two ways:
 
-- Using the centre [@zoffoli2020] vs the [peak](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/) wavelength of S2A bands, based on the [S2 Spectral Response Function Document: COPE-GSEG-EOPG-TN-15-0007](https://sentiwiki.copernicus.eu/web/document-library#DocumentLibrary-SENTINEL-2Documents), and using the S2 Spectral Response Function.
+- Using the centre [@zoffoli2020] vs the [peak](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/) wavelength of S2A bands, based on the [S2 Spectral Response Function (SRF) Document](https://sentiwiki.copernicus.eu/web/document-library#DocumentLibrary-SENTINEL-2Documents), and using the S2 SRF.
 - Testing three different vegetative indices, based on the comparison by @bargain2013
   - Normalised Difference Vegetative Index (NDVI)
   - Atmospherically-Resistant Vegetative Index (ARVI)
   - Modified Normalised Difference Index equivalent to the B5 and B6 bands of S2 (mND)
 
-While there were no significant difference in predictive performance between the centre and peak band wavelength, the latter was slightly better. For brevity, the results henceforth are based on the peak wavelength of the S2 bands.
+The values and indices derived from the three different methods of designating bands are similar. After deliberation, the SRF function for the S2A satellite was used. 
 
-Similarly, the indices performed similarly. NDVI is the only index here that uses only the 10m spatial resolution bands, unlike the ARVI and mND which rely on the 20m spatial resolution coastal band. Therefore, NDVI was selected as the optimal index.
+The indices performed similarly. NDVI is the only index here that uses only the 10m spatial resolution bands, unlike the ARVI and mND which rely on the 20m spatial resolution coastal band. Therefore, NDVI was selected as the optimal index.
 
 
 ### Accuracy Assessment
