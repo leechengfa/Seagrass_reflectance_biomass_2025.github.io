@@ -428,7 +428,7 @@ Carbon\,concentration\,(g\,per\,C/kg) = \frac{Measured\,Carbon\,(mg) \times Dry\
 
 As the relationship established using the [Normalised Difference Vegetation Index](https://en.wikipedia.org/wiki/Normalized_difference_vegetation_index) derived from hyperspectral data will be applied onto the Sentinel-2 (S2) image, the hyperspectral data needs to be translated to be equivalent to S2. This was explored and optimised in two ways:
 
-- Using the centre [@zoffoli2020] vs the [peak](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/) wavelength of S2A bands, based on the [S2 Spectral Response Function Document: COPE-GSEG-EOPG-TN-15-0007](https://sentiwiki.copernicus.eu/web/document-library#DocumentLibrary-SENTINEL-2Documents), and using the 
+- Using the centre [@zoffoli2020] vs the [peak](https://sigoiry.github.io/Fieldtrip_Rewrite_Sept2025/) wavelength of S2A bands, based on the [S2 Spectral Response Function Document: COPE-GSEG-EOPG-TN-15-0007](https://sentiwiki.copernicus.eu/web/document-library#DocumentLibrary-SENTINEL-2Documents), and using the S2 Spectral Response Function.
 - Testing three different vegetative indices, based on the comparison by @bargain2013
   - Normalised Difference Vegetative Index (NDVI)
   - Atmospherically-Resistant Vegetative Index (ARVI)
