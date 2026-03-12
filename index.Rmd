@@ -562,11 +562,10 @@ For more about the hyperspectral information, please see [here](https://leecheng
 
 ### Carbon data
 
-Work in progress. This section will be updated whenever the work is completed.
+For more about the carbon measurement, please see [here](https://leechengfa.github.io/seagrass_carbon_2025/).
 
 
-
-### General relationship between the reflectance and biomass
+### General relationship between the reflectance and aboveground biomass
 
 Similar to the matchup between AGB and BGB, there is a saturation of the NDVI at higher AGB (> 200 g/m^2^) [@bargain2013]. 
 
@@ -641,13 +640,13 @@ csv.biomass.reflectance <- csv.biomass %>%
   filter(biomass == 'A_per_m2') %>%
   distinct()
 
-plt.raw_biomass_index.norm.lm.rescaled <- ggplot(csv.biomass.reflectance %>% filter(weight_per_m2 < 200), aes(x = weight_per_m2, y = NDVI)) +
+plt.raw_biomass_index.norm.lm.rescaled <- ggplot(csv.biomass.reflectance %>% filter(weight_per_m2 < 200), aes(x = NDVI, y = weight_per_m2)) +
   geom_smooth(method = 'lm', colour = 'black') +
   geom_point_interactive(aes(tooltip = paste0('id: ', id), data_id = id, colour = site_location, shape = Location)) +
   scale_shape_discrete('Site', labels = c('Aveiro' = 'Ria de Aveiro', 'Bourgneuf_bay' = 'Bourgneuf Bay', 'Cadiz' = 'Cadiz Bay')) +
   scale_colour_discrete('Location', drop = FALSE) +
-  ylab('NDVI') + xlab('Aboveground Biomass (g/m<sup>2</sup>)') +
-  xlim(c(0, 150)) + ylim(c(0, 1)) +
+  xlab('NDVI') + ylab('Aboveground Biomass (g/m<sup>2</sup>)') +
+  # xlim(c(0, 150)) + ylim(c(0, 1)) +
   stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
   theme(axis.title.x = element_markdown(), axis.title.y = element_markdown()) +
   ggtitle(bquote('Linear model: AGB < 200'~g/m^2))
@@ -676,6 +675,133 @@ csv.biomass %>%
   drop_na(c(weight_per_m2, NDVI)) %>%
   summarise(`Relative RMSE` = summary(lm(NDVI ~ weight_per_m2))$residuals^2 %>% mean() %>% sqrt() %>% "/"(mean(NDVI)) %>% "*"(100),
             RMSE = summary(lm(NDVI ~ weight_per_m2))$residuals^2 %>% mean() %>% sqrt())
+```
+
+
+### General relationship between the reflectance and aboveground carbon
+
+Similar to the biomass match up, there is a saturation of the NDVI at higher carbon stock (> 100 g/m^2^). 
+
+```{r carbonpreprocessing}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.carbon.AV <- read_xlsx('data/carbon/Aveiro2025_Biomass_C_cores.xlsx', sheet = 'data') %>% select(-c(Habitat, Label)) %>% filter(PartType == 'Leaves') 
+  csv.carbon.AV$ID <- csv.carbon.AV$ID %>% gsub(' ', '', .)
+csv.carbon.BB <- read_xlsx('data/carbon/Bourgneuf2025_Biomass_C_cores.xlsx', sheet = 'data') %>% select(-c(Habitat, Label)) %>% filter(PartType == 'Leaves')
+csv.carbon.CB <- read_xlsx('data/carbon/Cadiz2025_Biomass_C_cores.xlsx', sheet = 'data') %>% select(-c(Habitat, Label)) %>% filter(PartType == 'Leaves')
+  csv.carbon.CB$ID <- paste0('ST', csv.carbon.CB$ID)
+
+csv.carbon <- rbind(csv.carbon.AV, csv.carbon.BB, csv.carbon.CB) %>%
+  inner_join(csv.biomass.reflectance, by = join_by(ID == id)) %>%
+  filter(!is.na(NDVI))
+  csv.carbon$CarbonTOC <- (as.numeric(csv.carbon$CarbonTC)/1000)/(as.numeric(csv.carbon$DryMassTC)/1000) - (as.numeric(csv.carbon$CarbonIC)/1000)/(as.numeric(csv.carbon$DryMassIC)/1000)
+  
+csv.carbon <- csv.carbon %>%
+  filter(!is.na(CarbonTOC))
+
+  csv.carbon$Cg_m2 <- csv.carbon$CarbonTOC * csv.carbon$weight_per_m2
+```
+
+```{r carbon, fig.cap = paste("Scatterplot of spectroradiometer-derived NDVI to seagrass leaf carbon An exponential curve was fitted to the dataset. By removing the saturated points (AGB > 200 g/m^2^), a linear relationship can be obtained up to the estimated point of saturation.", sep = "")}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+xmax <- 260
+ymax <- 0.8
+
+plt.carbon_index.norm.lm <- ggplot(csv.carbon, aes(x = Cg_m2, y = NDVI)) +
+  geom_smooth(method = 'lm', colour = 'black') +
+  geom_point_interactive(aes(tooltip = paste0('id: ', ID), data_id = ID, colour = site_location, shape = Location), show.legend = FALSE) +
+  scale_shape_discrete('Site', labels = c('Aveiro' = 'Ria de Aveiro', 'Bourgneuf_bay' = 'Bourgneuf Bay', 'Cadiz' = 'Cadiz Bay')) +
+  scale_colour_discrete('Location', drop = FALSE) +
+  xlab('Aboveground Carbon Stock (g/m<sup>2</sup>)') + ylab('NDVI') +
+  xlim(c(0, xmax)) + ylim(c(0, ymax)) +
+  stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
+  theme(axis.title.x = element_markdown(), axis.title.y = element_markdown()) +
+  ggtitle('Linear model: All data')
+  
+## NLS
+# using LM to estimate starting parameters for NLS to run
+init.d <- max(csv.carbon$NDVI, na.rm = TRUE) 
+csv.Creflect.0 <- lm(init.d - NDVI ~ Cg_m2, data = csv.carbon)
+csv.Creflect.nls <- nls(NDVI ~ a * (1 - exp(b*Cg_m2)), data = csv.carbon, start = list(a = csv.Creflect.0$coefficients[1], b = csv.Creflect.0$coefficients[2]), control = list(minFactor = 1/4096))
+csv.Creflect.nls.equation <- substitute(italic(y) == a * (1 - e^(b*x) ) * "," * ~italic("Residual SE") ~ "=" ~ rse, 
+                                       list(x = "x", y = "y",
+                                            a = summary(csv.Creflect.nls)$coefficients[1, 'Estimate'] %>% unname() %>% round(2) %>% format(nsmall = 2),
+                                            b = summary(csv.Creflect.nls)$coefficients[2, 'Estimate'] %>% unname() %>% round(2) %>% format(nsmall = 2),
+                                            rse =  summary(csv.Creflect.nls)$sigma %>% round(2) %>% format(nsmall = 2)
+                                            )) %>% 
+  as.expression() %>%
+  as.character()
+
+plt.carbon_index.all.nls <- ggplot(csv.carbon, aes(x = Cg_m2, y = NDVI)) +
+  geom_line(data = data.frame(x = csv.carbon$Cg_m2, y = predict(csv.Creflect.nls, newdata = csv.carbon)), aes(x = x, y = y), colour = 'black') +
+  geom_point_interactive(aes(tooltip = paste0('id: ', ID), data_id = ID, colour = site_location, shape = Location)) +
+  scale_shape_discrete('Site', labels = c('Aveiro' = 'Ria de Aveiro', 'Bourgneuf_bay' = 'Bourgneuf Bay', 'Cadiz' = 'Cadiz Bay')) +
+  scale_colour_discrete('Location', drop = FALSE) +
+  ylab('NDVI') + xlab('Aboveground Carbon Stock (g/m<sup>2</sup>)') +
+  xlim(c(0, xmax)) + ylim(c(0, ymax)) +
+  annotate("text", x = 1, y = Inf*0.9, hjust = 0, vjust = 1.2, label = csv.Creflect.nls.equation, parse = TRUE, colour = 'black') +
+  theme(axis.title.x = element_markdown(), axis.title.y = element_markdown()) +
+  ggtitle('Exponential model: All data')
+
+girafe(ggobj = (plt.carbon_index.norm.lm + plt.carbon_index.all.nls) + plot_layout(guides = 'collect', axes = 'collect') + plot_annotation(title = 'Spectroradiometer NDVI to leaf carbon'),
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 11
+)
+```
+
+A linear relationship was established between the spectroradiometer-derived NDVI and the seagrass leaf carbon (Figure \@ref(fig:carbonFinal), Adj. R^2^ = 0.33, RMSE = 6.35) up to 100 g/m^2^ in carbon stock. 
+
+```{r carbonFinal, fig.cap = paste("A zoomed-in look at the scatterplot of spectroradiometer-derived NDVI to seagrass leaf carbon. The RMSE for this model is in the table below.", sep = "")}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+plt.carbon_index.norm.lm.rescaled <- ggplot(csv.carbon %>% filter(Cg_m2 < 100), aes(x = NDVI, y = Cg_m2)) +
+  geom_smooth(method = 'lm', colour = 'black') +
+  geom_point_interactive(aes(tooltip = paste0('id: ', ID), data_id = ID, colour = site_location, shape = Location)) +
+  scale_shape_discrete('Site', labels = c('Aveiro' = 'Ria de Aveiro', 'Bourgneuf_bay' = 'Bourgneuf Bay', 'Cadiz' = 'Cadiz Bay')) +
+  scale_colour_discrete('Location', drop = FALSE) +
+  xlab('NDVI') + ylab('Aboveground Carbon Stock (g/m<sup>2</sup>)') +
+  # xlim(c(0, 150)) + ylim(c(0, 1)) +
+  stat_regline_equation(label.x.npc = 'left', label.y.npc = 'top', decreasing = TRUE, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~"))) +
+  theme(axis.title.x = element_markdown(), axis.title.y = element_markdown()) +
+  ggtitle(bquote('Linear model: Carbon Stock < 100'~g/m^2))
+    
+girafe(ggobj = plt.carbon_index.norm.lm.rescaled + plot_annotation(title = 'Spectroradiometer NDVI to leaf carbon'),
+       options = list(
+         opts_hover(css = "stroke-width:2px"),
+         opts_hover_inv(css = "opacity:0.1"),
+         opts_tooltip(opacity = 0.95, css = "padding:6px; font-size:12px")
+       ),
+       height_svg = 7, width_svg = 11
+)
+```
+
+```{r carbonFinalRMSE}
+#| echo: false
+#| error: false
+#| message: false
+#| warning: false
+
+csv.carbon %>%
+  ungroup() %>%
+  filter(Cg_m2 < 100) %>%
+  distinct() %>%
+  drop_na(c(Cg_m2, NDVI)) %>%
+  summarise(`Relative RMSE` = summary(lm(Cg_m2 ~ NDVI))$residuals^2 %>% mean() %>% sqrt() %>% "/"(mean(Cg_m2)) %>% "*"(100),
+            RMSE = summary(lm(Cg_m2 ~ NDVI))$residuals^2 %>% mean() %>% sqrt())
 ```
 
 ## References
