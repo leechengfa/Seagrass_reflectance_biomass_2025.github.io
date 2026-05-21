@@ -2,3 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# data
+data/
+Aveiro_reflectance-to-biomass.csv
+BourgneufBay_reflectance-to-biomass.csv
